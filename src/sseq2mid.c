@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "sseq2mid.h"
-
+#include <stdint.h>
 
 #ifndef countof
 #define countof(a)  (sizeof(a) / sizeof(a[0]))
