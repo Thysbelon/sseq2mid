@@ -19,5 +19,5 @@ gcc src/libsmfc.c src/libsmfcx.c src/sseq2mid.c -o sseq2mid
 I may write a Makefile later.
 
 ## Credits
-- [Loveemu]()
-- [Gota]() for [sequence.md]()
+- [Loveemu](https://github.com/loveemu)
+- [Gota](https://github.com/Gota7) for [sequence.md](https://github.com/Gota7/NitroStudio2/blob/master/docs/specs/sequence.md)
