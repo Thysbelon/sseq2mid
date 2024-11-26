@@ -20,4 +20,4 @@ I may write a Makefile later.
 
 ## Credits
 - [Loveemu](https://github.com/loveemu)
-- [Gota](https://github.com/Gota7) for [sequence.md](https://github.com/Gota7/NitroStudio2/blob/master/docs/specs/sequence.md)
+- [Gota](https://github.com/Gota7) for [sequence.md](https://github.com/Thysbelon/midi2sseq/blob/master/sequence.md)
