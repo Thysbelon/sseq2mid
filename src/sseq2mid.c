@@ -3,7 +3,7 @@
  * presented by loveemu, feel free to redistribute
  * see sseq2midConvert to know conversion detail :)
  */
-
+// TODO?: fix bug where multiple events with no 0x80 Wait command between them will be placed in the wrong order in the midi file. If there is no way to ensure correct order for many events on the same position in midi, then an alternate fix could be to insert a tiny amount of space between each event (but do so in a way that doesn't mess up actual 0x80 wait events)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -666,8 +666,8 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 								case 0xa0: /* Hanjuku Hero DS: NSE_45, New Mario Bros: BGM_AMB_CHIKA, Slime Morimori Dragon Quest 2: SE_187, SE_210, Advance Wars */
 								{
 									byte subStatusByte;
-									int randMin;
-									int randMax;
+									int16_t randMin;
+									int16_t randMax;
 
 									subStatusByte = getU1From(&sseq[curOffset]);
 									curOffset++;
@@ -676,7 +676,6 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									randMax = getU2LitFrom(&sseq[curOffset]);
 									curOffset += 2;
 
-									/* TEST */
 									char markerText[26]; // "Random:0xFF,-32767,-32767"
 									snprintf(markerText, 26, "Random:0x%02X,%d,%d", subStatusByte, randMin, randMax);
 									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 25);
@@ -707,7 +706,6 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 										curOffset++;
 									}
 
-									/* TEST */
 									char markerText[16]; // "UseVar:0xFF,255"
 									snprintf(markerText, 16, "UseVar:0x%02X,%u", subStatusByte, (uint8_t)varNumber);
 									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 15);
@@ -720,7 +718,6 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 								case 0xa2:
 								{
 									// params: Sequence Command. Executes P1 if the track's conditional flag is set
-									/* TEST */
 									byte subStatusByte;
 									subStatusByte = getU1From(&sseq[curOffset]);
 									
@@ -747,8 +744,8 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 								case 0xbc:
 								case 0xbd:
 								{
-									int varNumber;
-									int val;
+									uint8_t varNumber;
+									int16_t val;
 									const char* varMethodName[] = {
 										"=", "+=", "-=", "*=", "/=", "[Shift]", "[Rand]", "", 
 										"==", ">=", ">", "<=", "<", "!="
@@ -759,13 +756,12 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									val = getU2LitFrom(&sseq[curOffset]);
 									curOffset += 2;
 
-									/* TEST */
 									char markerText[29]; // "AssignVar:255,[Shift],-32767"
-									snprintf(markerText, 29, "AssignVar:%u,%s,%d", (uint8_t)varNumber, varMethodName[statusByte - 0xb0], val);
+									snprintf(markerText, 29, "AssignVar:%u,%s,%d", varNumber, varMethodName[statusByte - 0xb0], val);
 									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 28);
 
 									sprintf(eventName, "Variable %s", varMethodName[statusByte - 0xb0]);
-									sprintf(eventDesc, "var %d : %d", varNumber, val);
+									sprintf(eventDesc, "var %u : %d", varNumber, val);
 									break;
 								}
 
@@ -901,7 +897,6 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									flg = getU1From(&sseq[curOffset]);
 									curOffset++;
 
-									/* TEST */
 									// "If on, notes don't end and new notes just change the pitch and velocity of the playing note"
 									char markerText[8]; // Tie:Off
 									snprintf(markerText, 8, "Tie:%s", flg ? "On" : "Off");
