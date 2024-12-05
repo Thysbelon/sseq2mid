@@ -1,0 +1,6 @@
+*.exe
+*.mid
+*.sseq
+*.o
+*.d
+sseq2mid

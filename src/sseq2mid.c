@@ -677,9 +677,9 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									curOffset += 2;
 
 									/* TEST */
-									char markerText[27]; // "?Random=0xFF,-32767,-32767"
-									snprintf(markerText, 27, "?Random=0x%X,%d,%d", subStatusByte, randMin, randMax);
-									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 26);
+									char markerText[26]; // "Random:0xFF,-32767,-32767"
+									snprintf(markerText, 26, "Random:0x%02X,%d,%d", subStatusByte, randMin, randMax);
+									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 25);
 
 									sprintf(eventName, "Random (%02X)", subStatusByte);
 									sprintf(eventDesc, "Min:%d Max:%d", randMin, randMax);
@@ -708,9 +708,9 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									}
 
 									/* TEST */
-									char markerText[17]; // "?UseVar=0xFF,255"
-									snprintf(markerText, 17, "?UseVar=0x%X,%u", subStatusByte, (uint8_t)varNumber);
-									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 16);
+									char markerText[16]; // "UseVar:0xFF,255"
+									snprintf(markerText, 16, "UseVar:0x%02X,%u", subStatusByte, (uint8_t)varNumber);
+									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 15);
 
 									sprintf(eventName, "From Var (%02X)", subStatusByte);
 									sprintf(eventDesc, "var %d", varNumber);
@@ -724,9 +724,9 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									byte subStatusByte;
 									subStatusByte = getU1From(&sseq[curOffset]);
 									
-									char markerText[9];
-									snprintf(markerText, 9, "?If=0x%X", subStatusByte);
-									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 8);
+									char markerText[8]; // If:0xFF
+									snprintf(markerText, 8, "If:0x%02X", subStatusByte);
+									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 7);
 
 									sprintf(eventName, "If");
 									sprintf(eventDesc, "");
@@ -748,7 +748,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 								case 0xbd:
 								{
 									int varNumber;
-									int var; // TODO: rename to "value".
+									int val;
 									const char* varMethodName[] = {
 										"=", "+=", "-=", "*=", "/=", "[Shift]", "[Rand]", "", 
 										"==", ">=", ">", "<=", "<", "!="
@@ -756,16 +756,16 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 									varNumber = getU1From(&sseq[curOffset]);
 									curOffset++;
-									var = getU2LitFrom(&sseq[curOffset]);
+									val = getU2LitFrom(&sseq[curOffset]);
 									curOffset += 2;
 
 									/* TEST */
-									char markerText[29]; // "?AssignVar255 [Shift] -32767"
-									snprintf(markerText, 29, "?AssignVar%u %s %d", (uint8_t)varNumber, varMethodName[statusByte - 0xb0], var);
+									char markerText[29]; // "AssignVar:255,[Shift],-32767"
+									snprintf(markerText, 29, "AssignVar:%u,%s,%d", (uint8_t)varNumber, varMethodName[statusByte - 0xb0], val);
 									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 28);
 
 									sprintf(eventName, "Variable %s", varMethodName[statusByte - 0xb0]);
-									sprintf(eventDesc, "var %d : %d", varNumber, var);
+									sprintf(eventDesc, "var %d : %d", varNumber, val);
 									break;
 								}
 
@@ -903,9 +903,9 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 									/* TEST */
 									// "If on, notes don't end and new notes just change the pitch and velocity of the playing note"
-									char markerText[9];
-									snprintf(markerText, 9, "?Tie=%s", flg ? "On" : "Off");
-									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 8);
+									char markerText[8]; // Tie:Off
+									snprintf(markerText, 8, "Tie:%s", flg ? "On" : "Off");
+									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 7);
 
 									sprintf(eventName, "Tie");
 									sprintf(eventDesc, "%s (%d)", flg ? "On" : "Off", flg);
@@ -1129,9 +1129,9 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									curOffset++;
 
 									/* TEST */
-									char markerText[14];
-									snprintf(markerText, 14, "?PrintVar=%u", (uint8_t)varNumber);
-									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 13);
+									char markerText[13];
+									snprintf(markerText, 13, "PrintVar:%u", (uint8_t)varNumber);
+									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 12);
 
 									sprintf(eventName, "Print Variable");
 									sprintf(eventDesc, "%d", varNumber);
@@ -1181,9 +1181,9 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 									//smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_VIBRATODELAY, amount);
 									smfInsertControl(smf, absTime, midiCh, midiCh, 9, (((int32_t)amount + 0x7FFF) / (float)0xFFFE) * (int16_t)127 ); // If I ever make an NDS sound bank ripper that converts sound banks to sf2 files with modulators, this CC will be used as input for a modulator that controls vibrato. For now, it does nothing; only the below marker has any effect, and only when the midi is run through midi2sseq.
-									char markerText[19]; // "?SweepPitch=-32767"
-									snprintf(markerText, 19, "?SweepPitch=%d", amount);
-									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 18);
+									char markerText[18]; // "?SweepPitch=-32767"
+									snprintf(markerText, 18, "SweepPitch:%d", amount);
+									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 17);
 
 									sprintf(eventName, "Sweep Pitch");
 									sprintf(eventDesc, "%d", amount);
