@@ -3,7 +3,7 @@
  * presented by loveemu, feel free to redistribute
  * see sseq2midConvert to know conversion detail :)
  */
-// TODO?: fix bug where multiple events with no 0x80 Wait command between them will be placed in the wrong order in the midi file. If there is no way to ensure correct order for many events on the same position in midi, then an alternate fix could be to insert a tiny amount of space between each event (but do so in a way that doesn't mess up actual 0x80 wait events)
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +22,7 @@ bool g_modifyChOrder = false;
 bool g_noReverb = false;
 int g_loopCount = 1; 
 int g_loopStyle = 0;
+bool g_spacer = false;
 
 void dispatchLogMsg(const char* logMsg);
 bool dispatchOptionChar(const char optChar);
@@ -87,6 +88,10 @@ bool dispatchOptionChar(const char optChar)
 	case 'm':
 		g_modifyChOrder = true;
 		break;
+	
+	case 's':
+		g_spacer = true;
+		break;
 
 	default:
 		return false;
@@ -133,6 +138,10 @@ bool dispatchOptionStr(const char* optString)
 	{
 			g_loopStyle = 2;
 	}
+	else if(strcmp(optString, "spacer") == 0)
+	{
+			g_spacer = true;
+	}
 	else
 	{
 		return false;
@@ -152,6 +161,7 @@ void showUsage(void)
 		"-7", "--loopstyle2", "FF7 PC style loop points (Meta text \"loop(start/end)\"",
 		"-l", "--log", "put conversion log", 
 		"-m", "--modify-ch", "modify midi channel to avoid rhythm channel"
+		"-s", "--spacer", "(EXPERIMENTAL) insert a short rest in between simultaneous events"
 	};
 	int optIndex;
 
@@ -475,12 +485,16 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 			for(trackIndex = 0; trackIndex < SSEQ_MAX_TRACK; trackIndex++)
 			{
 				int loopCount = sseq2mid->track[trackIndex].loopCount;
+				
+				int stackedEventTimeSpacer = 0; // used to space out midi events that, in the original sseq, happen at the same time (but in a specific order). The spacer ensures that the order of events is the same as in the sseq.
+				
+				byte prevStatusByte=0x00;
 
 				if(loopCount > 0)
 				{
 					do
 					{
-						int absTime = sseq2mid->track[trackIndex].absTime;
+						int absTime = sseq2mid->track[trackIndex].absTime; // absTime does not persist through each loop, but sseq2mid->track[trackIndex].absTime does. All assignments to absTime go to sseq2mid->track[trackIndex].absTime
 						size_t curOffset = sseq2mid->track[trackIndex].curOffset;
 						size_t eventOffset = curOffset;
 						char eventName[64];
@@ -509,6 +523,10 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 							if(statusByte < 0x80)
 							{
+								if (g_spacer) {
+									if (prevStatusByte < 0x80) stackedEventTimeSpacer--;
+								}
+								
 								int velocity;
 								int duration;
 								const char* noteName[] = {
@@ -521,10 +539,11 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 								duration = smfReadVarLength(&sseq[curOffset], sseqSize - curOffset);
 								curOffset += smfGetVarLengthSize(duration);
 
-								smfInsertNote(smf, absTime, midiCh, midiCh, statusByte, velocity, duration);
+								smfInsertNote(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, statusByte, velocity, duration);
 								if(sseq2mid->track[trackIndex].noteWait)
 								{
 									absTime += duration;
+									stackedEventTimeSpacer=0;
 								}
 
 								sprintf(eventName, "Note with Duration");
@@ -543,6 +562,8 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									curOffset += smfGetVarLengthSize(tick);
 
 									absTime += tick;
+									
+									stackedEventTimeSpacer=0;
 
 									sprintf(eventName, "Rest");
 									sprintf(eventDesc, "%d", tick);
@@ -562,9 +583,9 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									program = realProgram % 128;
 									bankLsb = (realProgram / 128) % 128;
 									bankMsb = (realProgram / 128 / 128) % 128;
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_BANKSELM, bankMsb);
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_BANKSELL, bankLsb);
-									smfInsertProgram(smf, absTime, midiCh, midiCh, program);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_BANKSELM, bankMsb);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_BANKSELL, bankLsb);
+									smfInsertProgram(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, program);
 
 									sprintf(eventName, "Program Change");
 									sprintf(eventDesc, "%d", realProgram);
@@ -625,7 +646,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 												if(!loopPointUsed)
 												{
 														smfInsertMetaEvent(smf, sseq2mid->track[trackIndex].offsetToAbsTime[offsetToJump], midiCh, 6, "loopStart", 9);
-														smfInsertMetaEvent(smf, absTime, midiCh, 6, "loopEnd", 7);
+														smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, "loopEnd", 7);
 														loopPointUsed = true;
 												}
 												loopCount = 0;
@@ -678,7 +699,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 									char markerText[26]; // "Random:0xFF,-32767,-32767"
 									snprintf(markerText, 26, "Random:0x%02X,%d,%d", subStatusByte, randMin, randMax);
-									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 25);
+									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 25);
 
 									sprintf(eventName, "Random (%02X)", subStatusByte);
 									sprintf(eventDesc, "Min:%d Max:%d", randMin, randMax);
@@ -708,7 +729,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 									char markerText[16]; // "UseVar:0xFF,255"
 									snprintf(markerText, 16, "UseVar:0x%02X,%u", subStatusByte, (uint8_t)varNumber);
-									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 15);
+									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 15);
 
 									sprintf(eventName, "From Var (%02X)", subStatusByte);
 									sprintf(eventDesc, "var %d", varNumber);
@@ -723,7 +744,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									
 									char markerText[8]; // If:0xFF
 									snprintf(markerText, 8, "If:0x%02X", subStatusByte);
-									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 7);
+									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 7);
 
 									sprintf(eventName, "If");
 									sprintf(eventDesc, "");
@@ -758,7 +779,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 									char markerText[29]; // "AssignVar:255,[Shift],-32767"
 									snprintf(markerText, 29, "AssignVar:%u,%s,%d", varNumber, varMethodName[statusByte - 0xb0], val);
-									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 28);
+									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 28);
 
 									sprintf(eventName, "Variable %s", varMethodName[statusByte - 0xb0]);
 									sprintf(eventDesc, "var %u : %d", varNumber, val);
@@ -772,7 +793,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									pan = getU1From(&sseq[curOffset]);
 									curOffset++;
 
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_PANPOT, pan);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_PANPOT, pan);
 
 									sprintf(eventName, "Pan");
 									//sprintf(eventDesc, "%d", pan - 64);
@@ -787,7 +808,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									vol = getU1From(&sseq[curOffset]);
 									curOffset++;
 
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_VOLUME, vol);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_VOLUME, vol);
 
 									// sprintf(eventName, "Volume");
 									sprintf(eventName, "Track Volume"); // according to Gota7's sequence.md
@@ -802,7 +823,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									vol = getU1From(&sseq[curOffset]);
 									curOffset++;
 
-									smfInsertMasterVolume(smf, absTime, 0, midiCh, vol);
+									smfInsertMasterVolume(smf, absTime+stackedEventTimeSpacer, 0, midiCh, vol);
 
 									// sprintf(eventName, "Master Volume");
 									sprintf(eventName, "Player Volume"); // according to Gota7's sequence.md. Likely changes the volume of the master track
@@ -817,10 +838,10 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									transpose = getS1From(&sseq[curOffset]); // I think this is equal to the number of semitones moved. in ex song in vgmtrans: C30C is read as "12", 12 semitones (an octave) makes sense. -12 is probably down 12 semitones.
 									curOffset++;
 
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_RPNM, 0);
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_RPNL, 2);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_RPNM, 0);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_RPNL, 2);
 									//smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_DATAENTRYM, 64 + transpose);
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_DATAENTRYM, transpose + 32/*0x20*/);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_DATAENTRYM, transpose + 32/*0x20*/);
 									// "Coarse tuning: The coarse tuning RPNs use only the coarse data entry message to tune, with 0x20 representing central tuning of A = 440 Hz and with increments of whole semitones (e.g., 0x21 would be a whole semitone displacement up)."
 									// https://www.recordingblogs.com/wiki/midi-registered-parameter-number-rpn
 
@@ -837,7 +858,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									bend = getS1From(&sseq[curOffset]) * 64;
 									curOffset++;
 
-									smfInsertPitchBend(smf, absTime, midiCh, midiCh, bend);
+									smfInsertPitchBend(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, bend);
 
 									sprintf(eventName, "Pitch Bend");
 									sprintf(eventDesc, "%d", bend);
@@ -851,9 +872,9 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									range = getU1From(&sseq[curOffset]); // number of semitones. TODO: find out if negative values are valid
 									curOffset++;
 
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_RPNM, 0);
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_RPNL, 0);
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_DATAENTRYM, range);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_RPNM, 0);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_RPNL, 0);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_DATAENTRYM, range);
 
 									sprintf(eventName, "Pitch Bend Range");
 									sprintf(eventDesc, "%d", range);
@@ -867,7 +888,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									priority = getU1From(&sseq[curOffset]);
 									curOffset++;
 									
-									smfInsertControl(smf, absTime, midiCh, midiCh, 14, priority);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, 14, priority);
 
 									sprintf(eventName, "Priority");
 									sprintf(eventDesc, "%d", priority);
@@ -882,7 +903,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									flg = getU1From(&sseq[curOffset]);
 									curOffset++;
 
-									smfInsertControl(smf, absTime, midiCh, midiCh, flg ? SMF_CONTROL_MONO : SMF_CONTROL_POLY, 0);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, flg ? SMF_CONTROL_MONO : SMF_CONTROL_POLY, 0);
 									sseq2mid->track[trackIndex].noteWait = flg ? true : false;
 
 									sprintf(eventName, "Mono/Poly");
@@ -900,7 +921,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									// "If on, notes don't end and new notes just change the pitch and velocity of the playing note"
 									char markerText[8]; // Tie:Off
 									snprintf(markerText, 8, "Tie:%s", flg ? "On" : "Off");
-									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 7);
+									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 7);
 
 									sprintf(eventName, "Tie");
 									sprintf(eventDesc, "%s (%d)", flg ? "On" : "Off", flg);
@@ -914,7 +935,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									key = getU1From(&sseq[curOffset]);
 									curOffset++;
 
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_PORTAMENTOCTRL, key);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_PORTAMENTOCTRL, key);
 
 									sprintf(eventName, "Portamento Control");
 									sprintf(eventDesc, "%d", key);
@@ -928,7 +949,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									amount = getU1From(&sseq[curOffset]);
 									curOffset++;
 
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_MODULATION, amount);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_MODULATION, amount);
 
 									sprintf(eventName, "Modulation Depth");
 									sprintf(eventDesc, "%d", amount);
@@ -945,7 +966,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									//smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_VIBRATORATE, 64 + amount / 2);
 									// SMF_CONTROL_VIBRATORATE is cc76, which is Sound Controller 7: "Generic – Some manufacturers may use to further shave their sounds."
 									// https://nickfever.com/music/midi-cc-list
-									smfInsertControl(smf, absTime, midiCh, midiCh, /*cc*/21 /*same cc as gba_mus_ripper*/, amount); // other uint8 values, like 0xCA mod depth, seem to stay in between 0 and 127. This is also less lossy.
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, /*cc*/21 /*same cc as gba_mus_ripper*/, amount); // other uint8 values, like 0xCA mod depth, seem to stay in between 0 and 127. This is also less lossy.
 
 									sprintf(eventName, "Modulation Speed");
 									sprintf(eventDesc, "%d", amount);
@@ -960,8 +981,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									type = getU1From(&sseq[curOffset]);
 									curOffset++;
 									
-									/* TEST */
-									smfInsertControl(smf, absTime, midiCh, midiCh, /*cc*/22, type); // In the future, I may use cc110 and cc111 like gba_mus_ripper, but that would require writing/forking an nds sound bank ripper to add modulators to the sf2.
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, /*cc*/22, type); // In the future, I may use cc110 and cc111 like gba_mus_ripper, but that would require writing/forking an nds sound bank ripper to add modulators to the sf2.
 
 									sprintf(eventName, "Modulation Type");
 									sprintf(eventDesc, "%s", typeStr[type]);
@@ -976,7 +996,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									curOffset++;
 
 									//smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_VIBRATODEPTH, 64 + amount / 2); // SMF_CONTROL_VIBRATODEPTH is also a generic sound controller.
-									smfInsertControl(smf, absTime, midiCh, midiCh, /*cc*/3, amount);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, /*cc*/3, amount);
 
 									sprintf(eventName, "Modulation Range"); // TODO: how is this different from mod depth?
 									sprintf(eventDesc, "%d", amount);
@@ -991,7 +1011,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									flg = getU1From(&sseq[curOffset]);
 									curOffset++;
 
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_PORTAMENTO /*TODO: change name to PORTAMENTOSWITCH*/, !flg ? 0 : 127);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_PORTAMENTO /*TODO: change name to PORTAMENTOSWITCH*/, !flg ? 0 : 127);
 
 									sprintf(eventName, "Portamento");
 									sprintf(eventDesc, "%s (%d)", flg ? "On" : "Off", flg);
@@ -1005,7 +1025,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									time = getU1From(&sseq[curOffset]);
 									curOffset++;
 
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_PORTAMENTOTIME, time);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_PORTAMENTOTIME, time);
 
 									sprintf(eventName, "Portamento Time");
 									sprintf(eventDesc, "%d", time);
@@ -1021,7 +1041,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 #if 0
 									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_ATTACKTIME, 64 + amount / 2);
 #endif
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_ATTACKTIME, amount); // This may also require a modulator, but the semantic meaning of the midicc matches up.
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_ATTACKTIME, amount); // This may also require a modulator, but the semantic meaning of the midicc matches up.
 									sprintf(eventName, "Attack Rate"); 
 									sprintf(eventDesc, "%d", amount);
 									break;
@@ -1036,7 +1056,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 #if 0
 									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_DECAYTIME, 64 + amount / 2);
 #endif
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_DECAYTIME, amount); // This is a generic sound controller. I'll leave it as a generic sound controller since attack and release are also sound controllers.
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_DECAYTIME, amount); // This is a generic sound controller. I'll leave it as a generic sound controller since attack and release are also sound controllers.
 									sprintf(eventName, "Decay Rate");
 									sprintf(eventDesc, "%d", amount);
 									break;
@@ -1049,7 +1069,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									amount = getU1From(&sseq[curOffset]); 
 									curOffset++;
 									
-									smfInsertControl(smf, absTime, midiCh, midiCh, /*cc*/76, amount); // This is a generic sound controller
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, /*cc*/76, amount); // This is a generic sound controller
 
 									sprintf(eventName, "Sustain Rate");
 									sprintf(eventDesc, "%d", amount);
@@ -1065,7 +1085,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 #if 0
 									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_RELEASETIME, 64 + amount / 2);
 #endif
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_RELEASETIME, amount);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_RELEASETIME, amount);
 									sprintf(eventName, "Release Rate");
 									sprintf(eventDesc, "%d", amount);
 									break;
@@ -1109,7 +1129,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									expression = getU1From(&sseq[curOffset]);
 									curOffset++;
 
-									smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_EXPRESSION, expression);
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_EXPRESSION, expression);
 
 									sprintf(eventName, "Expression");
 									sprintf(eventDesc, "%d", expression);
@@ -1126,7 +1146,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									/* TEST */
 									char markerText[13];
 									snprintf(markerText, 13, "PrintVar:%u", (uint8_t)varNumber);
-									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 12);
+									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 12);
 
 									sprintf(eventName, "Print Variable");
 									sprintf(eventDesc, "%d", varNumber);
@@ -1143,7 +1163,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 									//smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_VIBRATODELAY, 64 + amount / 2);
 									// (amount / 0xffff) * 0x7f /*clamp uint16 range to the max possible value of a midi cc*/
-									smfInsertControl(smf, absTime, midiCh, midiCh, /*cc*/26, amount); // same as gba_mus_ripper
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, /*cc*/26, amount); // same as gba_mus_ripper
 									// TODO: research possible values for amount.
 									
 									sprintf(eventName, "Modulation Delay");
@@ -1175,10 +1195,10 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									curOffset += 2;
 
 									//smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_VIBRATODELAY, amount);
-									smfInsertControl(smf, absTime, midiCh, midiCh, 9, (((int32_t)amount + 0x7FFF) / (float)0xFFFE) * (int16_t)127 ); // If I ever make an NDS sound bank ripper that converts sound banks to sf2 files with modulators, this CC will be used as input for a modulator that controls vibrato. For now, it does nothing; only the below marker has any effect, and only when the midi is run through midi2sseq.
+									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, 9, (((int32_t)amount + 0x7FFF) / (float)0xFFFE) * (int16_t)127 ); // If I ever make an NDS sound bank ripper that converts sound banks to sf2 files with modulators, this CC will be used as input for a modulator that controls vibrato. For now, it does nothing; only the below marker has any effect, and only when the midi is run through midi2sseq.
 									char markerText[18]; // "?SweepPitch=-32767"
 									snprintf(markerText, 18, "SweepPitch:%d", amount);
-									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 17);
+									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 17);
 
 									sprintf(eventName, "Sweep Pitch");
 									sprintf(eventDesc, "%d", amount);
@@ -1307,6 +1327,22 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									break;
 								}
 							}
+							if (g_spacer) {
+								uint8_t spacerIncBlacklist[] = {0x80, 0x93, 0x95, 0xd4, 0xe1, 0xfc, 0xfd, 0xfe}; // list of commands that should not increment stackedEventTimeSpacer.
+								bool eventInBlacklist=false;
+								int spacerIncBlacklistLength = sizeof(spacerIncBlacklist) / sizeof(spacerIncBlacklist[0]);
+								for (int i=0; i<spacerIncBlacklistLength; i++) {
+									if (statusByte == spacerIncBlacklist[i]) {
+										eventInBlacklist=true;
+										break;
+									}
+								}
+								//printf("eventInBlacklist: %d\n", eventInBlacklist);
+								if (!(eventException==true || eventInBlacklist==true)) stackedEventTimeSpacer++;
+								//printf("stackedEventTimeSpacer: %d\n", stackedEventTimeSpacer);
+								//printf("absTime: %d\n", absTime);
+							}
+							prevStatusByte = statusByte;
 						}
 						else
 						{
@@ -1333,7 +1369,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 					{
 						smfInsertControl(smf, 0, midiCh, midiCh, SMF_CONTROL_REVERB, 0);
 					}
-					smfSetEndTimingOfTrack(smf, midiCh, sseq2mid->track[midiCh].absTime);
+					smfSetEndTimingOfTrack(smf, midiCh, sseq2mid->track[midiCh].absTime); // on new super mario bros, BGM_AMB_CHIKA, with stackedEventTimeSpacer, the note gets cut off.
 					sseq2midPutLog(sseq2mid, "\n");
 				}
 			}
