@@ -777,9 +777,9 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									val = getU2LitFrom(&sseq[curOffset]);
 									curOffset += 2;
 
-									char markerText[29]; // "AssignVar:255,[Shift],-32767"
-									snprintf(markerText, 29, "AssignVar:%u,%s,%d", varNumber, varMethodName[statusByte - 0xb0], val);
-									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 28);
+									char markerText[23]; // "Var:255,[Shift],-32767"
+									snprintf(markerText, 23, "Var:%u,%s,%d", varNumber, varMethodName[statusByte - 0xb0], val);
+									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 22);
 
 									sprintf(eventName, "Variable %s", varMethodName[statusByte - 0xb0]);
 									sprintf(eventDesc, "var %u : %d", varNumber, val);
@@ -853,6 +853,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 								case 0xc4:
 								{
 									// signed value. C400 is normal pitch (midi pitch 8192 / +0)
+									// WARNING: midi pitch bend is a 14-bit integer, while sseq pitch bend is a 16-bit signed integer. Conversion cannot be completely lossless.
 									int bend;
 
 									bend = getS1From(&sseq[curOffset]) * 64;
