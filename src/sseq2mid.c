@@ -160,7 +160,7 @@ void showUsage(void)
 		"-d", "--loopstyle1", "Duke nukem style loop points (Event 0x74/0x75)",
 		"-7", "--loopstyle2", "FF7 PC style loop points (Meta text \"loop(start/end)\"",
 		"-l", "--log", "put conversion log", 
-		"-m", "--modify-ch", "modify midi channel to avoid rhythm channel"
+		"-m", "--modify-ch", "modify midi channel to avoid rhythm channel",
 		"-s", "--spacer", "(EXPERIMENTAL) insert a short rest in between simultaneous events"
 	};
 	int optIndex;
