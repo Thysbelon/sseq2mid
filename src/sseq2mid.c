@@ -615,13 +615,15 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 								case 0x94:
 								{
+									// TODO: Change this to just insert a midi marker at the point of the jump that reads "Jump:0x00FFFF". midi2sseq should read this and convert it back into a jump. Only 0xD4 and 0xFC should correspond to loopStart and loopEnd. Doing it this way should work better with conditionals.
+									
 									int newOffset;
-
+                  
 									newOffset = getU3LitFrom(&sseq[curOffset]) + sseqOffsetBase;
 									curOffset += 3;
-
+                  
 									offsetToJump = newOffset;
-
+                  
 									if(offsetToJump >= sseq2mid->track[trackIndex].offsetToTop)
 									{
 										if(offsetToJump < curOffset)
@@ -641,7 +643,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 												}
 												loopCount = 0;
 												break;
-
+                  
 											case 2:
 												if(!loopPointUsed)
 												{
@@ -663,6 +665,10 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 										/* redirect */
 									}
 
+									//char markerText[14]; // "Jump:0x00FFFF"
+									//snprintf(markerText, 14, "Jump:0x%06X", newOffset);
+									//smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 13);
+									
 									sprintf(eventName, "Jump");
 									sprintf(eventDesc, "%08X", newOffset);
 									break;
@@ -739,12 +745,18 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 								case 0xa2:
 								{
 									// params: Sequence Command. Executes P1 if the track's conditional flag is set
-									byte subStatusByte;
-									subStatusByte = getU1From(&sseq[curOffset]);
+									//byte subStatusByte;
+									//subStatusByte = getU1From(&sseq[curOffset]);
 									
-									char markerText[8]; // If:0xFF
-									snprintf(markerText, 8, "If:0x%02X", subStatusByte);
-									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 7);
+									//char markerText[8]; // If:0xFF
+									//snprintf(markerText, 8, "If:0x%02X", subStatusByte);
+									//smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 7);
+									
+									// Looking at Tottoko Hamutaro - Nazo Nazo Q MUS_ENDROOL, It seems that the command argument of 0xA2 also includes the parameter of that command. Because different commands have different length parameters, the command argument of 0xA2 has a variable length. 
+									// TODO: put this entire switch case ladder in a function (function should just return text or the values for a midi cc, which the caller will use to run smfInsertControl or smfInsertMetaEvent), then call that function again for the subStatusByte to determine the length of 0xA2 and create the appropriate midi marker text.
+									// example: if 0xA2 is being used to conditionally run a jump command (A2 94 3A 04 00), the corresponding midi marker text should be "If:Jump:0x00043A". In the short term, I may simplify this to "If:94,3A,04,00" (just a list of bytes).
+									
+									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, "If (Not yet supported)", 22);
 
 									sprintf(eventName, "If");
 									sprintf(eventDesc, "");
@@ -870,7 +882,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 								{
 									int range;
 
-									range = getU1From(&sseq[curOffset]); // number of semitones. TODO: find out if negative values are valid
+									range = getU1From(&sseq[curOffset]); // number of semitones. TODO: find out if negative values are valid by injecting sequence data into a DS game.
 									curOffset++;
 
 									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, SMF_CONTROL_RPNM, 0);
@@ -899,13 +911,18 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 								case 0xc7: /* Dawn of Sorrow: SDL_BGM_ARR1_ */
 								{
 									// sequence.md describes this as "note wait mode": "Is off by default, but if on waits for a note to finish before continuing". "waiting for a note to finish" effectively means that the music/channel is monophonic (only one note can play at a time) instead of polyphonic (multiple notes can play at the same time)
+									
+									
 									int flg;
 
 									flg = getU1From(&sseq[curOffset]);
 									curOffset++;
 
+									/*
 									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, flg ? SMF_CONTROL_MONO : SMF_CONTROL_POLY, 0);
 									sseq2mid->track[trackIndex].noteWait = flg ? true : false;
+									*/
+									// I have yet to find a song that sets notewait to on, and Poly On events in Reaper are difficult (They're not selected when using ctrl+a)
 
 									sprintf(eventName, "Mono/Poly");
 									sprintf(eventDesc, "%s (%d)", flg ? "Mono" : "Poly", flg);
@@ -1098,6 +1115,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									loopStartCount = getU1From(&sseq[curOffset]);
 									curOffset++;
 
+									
 									loopStartOffset = curOffset;
 									if(loopStartCount == 0)
 									{
@@ -1116,6 +1134,13 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 													loopStartPointUsed = true;
 											}
 									}
+									
+									
+									/*
+									char markerText[14]; // loopStart:255
+									snprintf(markerText, 14, "loopStart:%u", loopStartCount);
+									smfInsertMetaEvent(smf, absTime, midiCh, 6, markerText, 13);
+									*/
 
 									sprintf(eventName, "Loop Start");
 									sprintf(eventDesc, "%d", loopStartCount);
@@ -1165,7 +1190,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									//smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_VIBRATODELAY, 64 + amount / 2);
 									// (amount / 0xffff) * 0x7f /*clamp uint16 range to the max possible value of a midi cc*/
 									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, /*cc*/26, amount); // same as gba_mus_ripper
-									// TODO: research possible values for amount.
+									// TODO: research possible values for amount by injecting sequence data into a ds game. highest priority.
 									
 									sprintf(eventName, "Modulation Delay");
 									sprintf(eventDesc, "%d", amount);
@@ -1191,7 +1216,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									// Gota's sequence.md lists this as 0xE2, which seems to be a typo.
 									int amount;
 
-									amount = getS2LitFrom(&sseq[curOffset]); // TODO: research possible values for amount. negative values likely set the sweep pitch below the default; or maybe negative values are invalid?
+									amount = getS2LitFrom(&sseq[curOffset]); // TODO: research possible values for amount by injecting sequence data into a DS game. negative values likely set the sweep pitch below the default; or maybe negative values are invalid?
 									// ex song contains "E3 C0 FF" and "E3 00 FA". Both of these are far outside the valid midi cc range of 0-127. I have implemented per-track text markers containing the original value so events like these can be converted losslessly.
 									curOffset += 2;
 
@@ -1208,6 +1233,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 								case 0xfc: /* Dawn of Sorrow: SDL_BGM_WIND_ */
 								{
+									
 									if(loopStartCount > 0)
 									{
 											loopStartCount--;
@@ -1239,6 +1265,9 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 													break;
 											}
 									}
+									
+									
+									//smfInsertMetaEvent(smf, absTime, midiCh, 6, "loopEnd", 7);
 
 									sprintf(eventName, "Loop End");
 									sprintf(eventDesc, "");
