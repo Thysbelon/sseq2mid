@@ -12,7 +12,7 @@ Please refer to [sequence.md](https://github.com/Thysbelon/midi2sseq/blob/master
 - `Random:0x??,#,#` - `0xA0`
 - `UseVar:0x??,var#` - `0xA1`
 - `If:0x??` - `0xA2`
-- `AssignVar:var#,<operation>,#` - `0xB0` to `0xBD` (except 0xB7)
+- `Var:var#,<operation>,#` - `0xB0` to `0xBD` (except 0xB7)
 - `CC14` - `0xC6` (sets priority, which determines if the game engine should interrupt this track when playing sound effects)
 - `Tie:<on/off>` - `0xC8`
 - `CC21` - `0xCB` (sets speed of vibrato/tremolo/autopan)
