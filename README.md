@@ -4,6 +4,9 @@ An updated fork of a [tool originally written by loveemu](https://github.com/lov
 
 To listen to converted midi files, I recommend using [VGMTrans](https://github.com/vgmtrans/vgmtrans) to convert an NDS song's sound bank to an SF2.
 
+To edit the midi files produced by this program, please use a midi editor that supports multiple tracks in midi files (type 1 midi files). This is needed so that text markers corresponding to sseq commands are placed on the correct tracks.   
+When opening this program's midi files in a DAW such as Reaper, please choose to separate tracks, but do not separate channels.
+
 This software has not been rigorously tested. If you encounter a bug, please open an issue in the issues tab and state the game and song with which you experienced the issue. I may not immediately respond to issues, but I always appreciate receiving them.
 
 ## List of Special Undefined Midi CC and Text Markers, and the sseq Commands they Convert to
