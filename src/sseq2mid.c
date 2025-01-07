@@ -435,7 +435,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 			int trackIndex;
 			int midiCh;
 			size_t sseqOffsetBase;
-			int midiChOrder[SSEQ_MAX_TRACK] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 9 };
+			int midiChOrder[SSEQ_MAX_TRACK] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 9 }; // ! TODO (high priority): change behavior of -m so that when the sseq has 16 tracks (the maximum) instead of sseq channel 10 being placed on midi channel 9 (drums) and becoming inaudible, sseq channels 0-8 are placed on midi channels 0-8 then sseq channels 9-14 are placed on midi channels 10-15 then sseq channel 15 is placed on midi channel 0 *on the next midi port*. This is how vgmtrans handles it. Sonic Rush SEQ_4sonic.sseq
 
 			/* put SSEQ header info */
 			sseq2midPutLogLine(sseq2mid, 0x00, 4, "Signature", "SSEQ");
@@ -457,7 +457,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 			sseq2midPutLog(sseq2mid, "\n");
 
 			/* initialize channel order */
-			for(midiCh = 0; midiCh < SSEQ_MAX_TRACK; midiCh++)
+			for(midiCh = 0; midiCh < SSEQ_MAX_TRACK; midiCh++) // !
 			{
 				sseq2mid->chOrder[midiCh] = sseq2mid->modifyChOrder ? midiChOrder[midiCh] : midiCh;
 			}
@@ -552,9 +552,9 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 							}
 							else
 							{
-								switch(statusByte)
+								switch(statusByte) // Match sseq commands with equivalent midi commands, and if no equivalent midi commands exist, match them with undefined midi CCs. This program is compatible with my fork of midi2sseq, and it is possible to convert back and forth between sseq and midi (mostly) losslessly.
 								{
-								case 0x80: // Match sseq commands with equivalent midi commands, and if no equivalent midi commands exist, match them with undefined midi CCs. This program is compatible with my fork of midi2sseq, and it is possible to convert back and forth between sseq and midi (mostly) losslessly.
+								case 0x80:
 								{
 									int tick;
 
@@ -753,7 +753,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									//smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 7);
 									
 									// Looking at Tottoko Hamutaro - Nazo Nazo Q MUS_ENDROOL, It seems that the command argument of 0xA2 also includes the parameter of that command. Because different commands have different length parameters, the command argument of 0xA2 has a variable length. 
-									// TODO: put this entire switch case ladder in a function (function should just return text or the values for a midi cc, which the caller will use to run smfInsertControl or smfInsertMetaEvent), then call that function again for the subStatusByte to determine the length of 0xA2 and create the appropriate midi marker text.
+									// TODO (high priority): put this entire switch case ladder in a function (function should just return text or the values for a midi cc, which the caller will use to run smfInsertControl or smfInsertMetaEvent), then call that function again for the subStatusByte to determine the length of 0xA2 and create the appropriate midi marker text.
 									// example: if 0xA2 is being used to conditionally run a jump command (A2 94 3A 04 00), the corresponding midi marker text should be "If:Jump:0x00043A". In the short term, I may simplify this to "If:94,3A,04,00" (just a list of bytes).
 									
 									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, "If (Not yet supported)", 22);
@@ -837,8 +837,8 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 									smfInsertMasterVolume(smf, absTime+stackedEventTimeSpacer, 0, midiCh, vol);
 
-									// sprintf(eventName, "Master Volume");
-									sprintf(eventName, "Player Volume"); // according to Gota7's sequence.md. Likely changes the volume of the master track
+									sprintf(eventName, "Master Volume");
+									// sprintf(eventName, "Player Volume"); // according to Gota7's sequence.md. Likely changes the volume of the master track
 									sprintf(eventDesc, "%d", vol);
 									break;
 								}
@@ -1186,11 +1186,15 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 									amount = getU2LitFrom(&sseq[curOffset]);
 									curOffset += 2;
-
-									//smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_VIBRATODELAY, 64 + amount / 2);
-									// (amount / 0xffff) * 0x7f /*clamp uint16 range to the max possible value of a midi cc*/
-									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, /*cc*/26, amount); // same as gba_mus_ripper
-									// TODO: research possible values for amount by injecting sequence data into a ds game. highest priority.
+									
+									if ((int16_t)amount <= 0x7F && (int16_t)amount >= 0) {
+										smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, /*cc*/26, (int8_t)amount); // same as gba_mus_ripper
+										// It seems like high values are valid, but impractical.
+									} else {
+										char markerText[16]; // ModDelay:-32767
+										snprintf(markerText, 16, "ModDelay:%d", (int16_t)amount);
+										smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 15);
+									}
 									
 									sprintf(eventName, "Modulation Delay");
 									sprintf(eventDesc, "%d", amount);
@@ -1222,7 +1226,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 									//smfInsertControl(smf, absTime, midiCh, midiCh, SMF_CONTROL_VIBRATODELAY, amount);
 									smfInsertControl(smf, absTime+stackedEventTimeSpacer, midiCh, midiCh, 9, (((int32_t)amount + 0x7FFF) / (float)0xFFFE) * (int16_t)127 ); // If I ever make an NDS sound bank ripper that converts sound banks to sf2 files with modulators, this CC will be used as input for a modulator that controls vibrato. For now, it does nothing; only the below marker has any effect, and only when the midi is run through midi2sseq.
-									char markerText[18]; // "?SweepPitch=-32767"
+									char markerText[18]; // "SweepPitch:-32767"
 									snprintf(markerText, 18, "SweepPitch:%d", amount);
 									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 17);
 
