@@ -1,1 +1,1 @@
-gcc src/libsmfc.c src/libsmfcx.c src/sseq2mid.c -o sseq2mid
+gcc -Wno-format-zero-length -Wno-format-security -Wno-format-extra-args -Wno-format src/libsmfc.c src/libsmfcx.c src/sseq2mid.c -o sseq2mid

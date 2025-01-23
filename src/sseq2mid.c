@@ -45,6 +45,9 @@ unsigned int getU2LitFrom(byte* data);
 unsigned int getU3LitFrom(byte* data);
 unsigned int getU4LitFrom(byte* data);
 
+void readVarCom(byte* sseq, size_t* curOffset, char* outputString, byte statusByte, char* eventName, char* eventDesc);
+void readUseVar(byte* sseq, size_t* curOffset, char* outputString, char* eventName, char* eventDesc);
+void readParamOfType(char* outputText, int sseqParamType, byte* sseq, size_t* curOffset, size_t* sseqOffsetBase, size_t* sseqSize);
 
 /* dispatch log message */
 void dispatchLogMsg(const char* logMsg)
@@ -79,6 +82,10 @@ bool dispatchOptionChar(const char optChar)
 
 	case 'd':
 		g_loopStyle = 1;
+		break;
+	
+	case 'c':
+		g_loopStyle = 3;
 		break;
 
 	case 'l':
@@ -138,6 +145,10 @@ bool dispatchOptionStr(const char* optString)
 	{
 			g_loopStyle = 2;
 	}
+	else if(strcmp(optString, "loopstyle3") == 0)
+	{
+			g_loopStyle = 3;
+	}
 	else if(strcmp(optString, "spacer") == 0)
 	{
 			g_spacer = true;
@@ -159,6 +170,7 @@ void showUsage(void)
 		"-2", "--2loop", "convert to 2 loop", 
 		"-d", "--loopstyle1", "Duke nukem style loop points (Event 0x74/0x75)",
 		"-7", "--loopstyle2", "FF7 PC style loop points (Meta text \"loop(start/end)\"",
+		"-c", "--loopstyle3", "Complex loops: print jump events as is instead of simplifying to loop points",
 		"-l", "--log", "put conversion log", 
 		"-m", "--modify-ch", "modify midi channel to avoid rhythm channel",
 		"-s", "--spacer", "(EXPERIMENTAL) insert a short rest in between simultaneous events"
@@ -435,7 +447,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 			int trackIndex;
 			int midiCh;
 			size_t sseqOffsetBase;
-			int midiChOrder[SSEQ_MAX_TRACK] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 9 }; // ! TODO (high priority): change behavior of -m so that when the sseq has 16 tracks (the maximum) instead of sseq channel 10 being placed on midi channel 9 (drums) and becoming inaudible, sseq channels 0-8 are placed on midi channels 0-8 then sseq channels 9-14 are placed on midi channels 10-15 then sseq channel 15 is placed on midi channel 0 *on the next midi port*. This is how vgmtrans handles it. Sonic Rush SEQ_4sonic.sseq
+			int midiChOrder[SSEQ_MAX_TRACK] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 9 }; // ! TODO (high priority): change behavior of -m so that when the sseq has 16 tracks (the maximum) instead of sseq channel 10 being placed on midi channel 9 (drums) and becoming inaudible, sseq channels 0-8 are placed on midi channels 0-8 then sseq channels 9-14 are placed on midi channels 10-15 then sseq channel 15 is placed on midi channel 0 *on the next midi port*. This is how vgmtrans handles it. Sonic Rush SEQ_4sonic.sseq. Dawn of Sorrow SDL_BGM_BOSS1_.sseq.
 
 			/* put SSEQ header info */
 			sseq2midPutLogLine(sseq2mid, 0x00, 4, "Signature", "SSEQ");
@@ -615,54 +627,60 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 								case 0x94:
 								{
-									// TODO: Change this to just insert a midi marker at the point of the jump that reads "Jump:0x00FFFF". midi2sseq should read this and convert it back into a jump. Only 0xD4 and 0xFC should correspond to loopStart and loopEnd. Doing it this way should work better with conditionals.
-									
 									int newOffset;
-                  
-									newOffset = getU3LitFrom(&sseq[curOffset]) + sseqOffsetBase;
-									curOffset += 3;
-                  
-									offsetToJump = newOffset;
-                  
-									if(offsetToJump >= sseq2mid->track[trackIndex].offsetToTop)
-									{
-										if(offsetToJump < curOffset)
+									if (g_loopStyle == 3) {
+										newOffset = getU3LitFrom(&sseq[curOffset]);
+										curOffset += 3;
+										
+										char markerText[14]; // Jump:0x010101
+										snprintf(markerText, 14, "Jump:0x%06X", newOffset);
+										smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 13);
+									} else {
+										newOffset = getU3LitFrom(&sseq[curOffset]) + sseqOffsetBase;
+										curOffset += 3;
+										
+										offsetToJump = newOffset;
+										
+										if(offsetToJump >= sseq2mid->track[trackIndex].offsetToTop)
 										{
-											switch(g_loopStyle)
+											if(offsetToJump < curOffset)
 											{
-											case 0:
-												loopCount--;
-												break;
-											
-											case 1: 
-												if(!loopPointUsed)
+												switch(g_loopStyle)
 												{
-														smfInsertControl(smf, sseq2mid->track[trackIndex].offsetToAbsTime[offsetToJump], midiCh, midiCh, 0x74, 0);
-														smfInsertControl(smf, absTime, midiCh, midiCh, 0x75, 0);
-														loopPointUsed = true;
+												case 0:
+													loopCount--;
+													break;
+												
+												case 1: 
+													if(!loopPointUsed)
+													{
+															smfInsertControl(smf, sseq2mid->track[trackIndex].offsetToAbsTime[offsetToJump], midiCh, midiCh, 0x74, 0);
+															smfInsertControl(smf, absTime, midiCh, midiCh, 0x75, 0);
+															loopPointUsed = true;
+													}
+													loopCount = 0;
+													break;
+										
+												case 2:
+													if(!loopPointUsed)
+													{
+															smfInsertMetaEvent(smf, sseq2mid->track[trackIndex].offsetToAbsTime[offsetToJump], midiCh, 6, "loopStart", 9);
+															smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, "loopEnd", 7);
+															loopPointUsed = true;
+													}
+													loopCount = 0;
+													break;
 												}
-												loopCount = 0;
-												break;
-                  
-											case 2:
-												if(!loopPointUsed)
-												{
-														smfInsertMetaEvent(smf, sseq2mid->track[trackIndex].offsetToAbsTime[offsetToJump], midiCh, 6, "loopStart", 9);
-														smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, "loopEnd", 7);
-														loopPointUsed = true;
-												}
-												loopCount = 0;
-												break;
+											}
+											else
+											{
+												/* jump to forward */
 											}
 										}
 										else
 										{
-											/* jump to forward */
+											/* redirect */
 										}
-									}
-									else
-									{
-										/* redirect */
 									}
 
 									//char markerText[14]; // "Jump:0x00FFFF"
@@ -714,31 +732,36 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 								case 0xa1: /* New Mario Bros: BGM_AMB_SABAKU */
 								{
-									// 0xA1. params: Sequence Command, u8. Replaces the last parameter of P1 with the value of variable P2
-									byte subStatusByte;
-									int varNumber;
-
-									subStatusByte = getU1From(&sseq[curOffset]);
-									curOffset++;
-									if(subStatusByte >= 0xb0 && subStatusByte <= 0xbd) /* var */
-									{
-										/* loveemu is a lazy person :P */
-										curOffset++;
-										varNumber = getU1From(&sseq[curOffset]);
-										curOffset++;
-									}
-									else
-									{
-										varNumber = getU1From(&sseq[curOffset]);
-										curOffset++;
-									}
-
-									char markerText[16]; // "UseVar:0xFF,255"
-									snprintf(markerText, 16, "UseVar:0x%02X,%u", subStatusByte, (uint8_t)varNumber);
+									//// 0xA1. params: Sequence Command, u8. Replaces the last parameter of P1 with the value of variable P2
+									//byte subStatusByte;
+									//int varNumber;
+                  //
+									//subStatusByte = getU1From(&sseq[curOffset]);
+									//curOffset++;
+									//if(subStatusByte >= 0xb0 && subStatusByte <= 0xbd) /* var */
+									//{
+									//	/* loveemu is a lazy person :P */
+									//	curOffset++;
+									//	varNumber = getU1From(&sseq[curOffset]);
+									//	curOffset++;
+									//}
+									//else
+									//{
+									//	varNumber = getU1From(&sseq[curOffset]);
+									//	curOffset++;
+									//}
+                  //
+									//char markerText[16]; // "UseVar:0xFF,255"
+									//snprintf(markerText, 16, "UseVar:0x%02X,%u", subStatusByte, (uint8_t)varNumber);
+									//smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 15);
+                  //
+									//sprintf(eventName, "From Var (%02X)", subStatusByte);
+									//sprintf(eventDesc, "var %d", varNumber);
+									//break;
+									
+									char markerText[16];
+									readUseVar(sseq, &curOffset, markerText, eventName, eventDesc);
 									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 15);
-
-									sprintf(eventName, "From Var (%02X)", subStatusByte);
-									sprintf(eventDesc, "var %d", varNumber);
 									break;
 								}
 
@@ -748,18 +771,74 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									//byte subStatusByte;
 									//subStatusByte = getU1From(&sseq[curOffset]);
 									
-									//char markerText[8]; // If:0xFF
-									//snprintf(markerText, 8, "If:0x%02X", subStatusByte);
-									//smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 7);
+									//smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, "If (Not yet supported)", 22);
+																		
+									byte subStatusByte;
+									subStatusByte = getU1From(&sseq[curOffset]);
+									curOffset++;
 									
-									// Looking at Tottoko Hamutaro - Nazo Nazo Q MUS_ENDROOL, It seems that the command argument of 0xA2 also includes the parameter of that command. Because different commands have different length parameters, the command argument of 0xA2 has a variable length. 
-									// TODO (high priority): put this entire switch case ladder in a function (function should just return text or the values for a midi cc, which the caller will use to run smfInsertControl or smfInsertMetaEvent), then call that function again for the subStatusByte to determine the length of 0xA2 and create the appropriate midi marker text.
-									// example: if 0xA2 is being used to conditionally run a jump command (A2 94 3A 04 00), the corresponding midi marker text should be "If:Jump:0x00043A". In the short term, I may simplify this to "If:94,3A,04,00" (just a list of bytes).
+									//printf("subStatusByte: 0x%02X\n", subStatusByte);
 									
-									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, "If (Not yet supported)", 22);
+									char ifMarkerText[0xFF];
+									char subCommandMarkerText[0x7F];
+									if (subStatusByte == 0xA1) {
+										readUseVar(sseq, &curOffset, subCommandMarkerText, eventName, eventDesc);
+									} else if ((subStatusByte >= 0xB0 && subStatusByte <= 0xB6) || (subStatusByte >= 0xB8 && subStatusByte <= 0xBD)) {
+										readVarCom(sseq, &curOffset, subCommandMarkerText, statusByte, eventName, eventDesc);
+									} else if (subStatusByte < 0x80) { // note
+										int velocity;
+										int duration;
+										/*
+										const char* noteName[] = {
+											"C ", "C#", "D ", "D#", "E ", "F ", 
+											"F#", "G ", "G#", "A ", "A#", "B "
+										};
+										*/
+
+										velocity = getU1From(&sseq[curOffset]);
+										curOffset++;
+										duration = smfReadVarLength(&sseq[curOffset], sseqSize - curOffset);
+										curOffset += smfGetVarLengthSize(duration);
+										snprintf(subCommandMarkerText, 0x7F, "Note0x%02X:%d,%d", subStatusByte, velocity, duration);
+									} else {
+										int comIndex=0;
+										for (comIndex=0; comIndex < sseqComListLen; comIndex++){
+											if (sseqComList[comIndex].commandByte == subStatusByte){
+												break;
+											}
+										}
+										strcpy(subCommandMarkerText, sseqComList[comIndex].commandName);
+										strcat(subCommandMarkerText, ":");
+										//printf("subCommandMarkerText: %s\n", subCommandMarkerText);
+										// void readParamOfType(char* outputText, int sseqParamType, byte* sseq, size_t* curOffset, size_t* sseqOffsetBase, size_t* sseqSize);
+										if (sseqComList[comIndex].param1 != NOPARAM){
+											char param1valText[10]; 
+											readParamOfType(param1valText, sseqComList[comIndex].param1, sseq, &curOffset, &sseqOffsetBase, &sseqSize);
+											//printf("param1valText: %s\n", param1valText);
+											strcat(subCommandMarkerText, param1valText);
+											
+											if (sseqComList[comIndex].param2 != NOPARAM){
+												strcat(subCommandMarkerText, ",");
+												char param2valText[10]; 
+												readParamOfType(param2valText, sseqComList[comIndex].param1, sseq, &curOffset, &sseqOffsetBase, &sseqSize);
+												strcat(subCommandMarkerText, param2valText);
+												
+												if (sseqComList[comIndex].param3 != NOPARAM){
+													strcat(subCommandMarkerText, ",");
+													char param3valText[10]; 
+													readParamOfType(param3valText, sseqComList[comIndex].param1, sseq, &curOffset, &sseqOffsetBase, &sseqSize);
+													strcat(subCommandMarkerText, param3valText);
+												}
+											}
+										}
+										//printf("subCommandMarkerText: %s\n", subCommandMarkerText);
+									}
+									snprintf(ifMarkerText, 0xFF, "If:%s", subCommandMarkerText);
+									//printf("ifMarkerText: %s\n", ifMarkerText);
+									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, ifMarkerText, strlen(ifMarkerText));
 
 									sprintf(eventName, "If");
-									sprintf(eventDesc, "");
+									sprintf(eventDesc, ""); // TODO: add description here.
 									break;
 								}
 
@@ -777,6 +856,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 								case 0xbc:
 								case 0xbd:
 								{
+									/*
 									uint8_t varNumber;
 									int16_t val;
 									const char* varMethodName[] = {
@@ -795,6 +875,18 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 									sprintf(eventName, "Variable %s", varMethodName[statusByte - 0xb0]);
 									sprintf(eventDesc, "var %u : %d", varNumber, val);
+									break;
+									*/
+									
+									// void readVarCom(byte** sseqPointer, size_t* curOffset, char** outputString, byte statusByte, char** eventName, char** eventDesc)
+									//printf("curOffset before: %d\n", curOffset);
+									char markerText[23];
+									readVarCom(sseq, &curOffset, markerText, statusByte, eventName, eventDesc);
+									//printf("markerText: %s\n", markerText);
+									smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 22);
+									//printf("curOffset after: %d\n", curOffset);
+									//sprintf(eventName, "Var Command");
+									//sprintf(eventDesc, "%s", markerText); 
 									break;
 								}
 
@@ -835,7 +927,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									vol = getU1From(&sseq[curOffset]);
 									curOffset++;
 
-									smfInsertMasterVolume(smf, absTime+stackedEventTimeSpacer, 0, midiCh, vol);
+									smfInsertMasterVolume(smf, absTime+stackedEventTimeSpacer, 0, midiCh, vol); // a bug in Reaper might cause the sysex to not appear when the tracks of the midi file are expanded into multiple Reaper tracks.
 
 									sprintf(eventName, "Master Volume");
 									// sprintf(eventName, "Player Volume"); // according to Gota7's sequence.md. Likely changes the volume of the master track
@@ -865,7 +957,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 								case 0xc4:
 								{
 									// signed value. C400 is normal pitch (midi pitch 8192 / +0)
-									// WARNING: midi pitch bend is a 14-bit integer, while sseq pitch bend is a 16-bit signed integer. Conversion cannot be completely lossless.
+									// WARNING: midi pitch bend is a 14-bit integer, while sseq pitch bend is a 8-bit signed integer. Conversion cannot be completely lossless.
 									int bend;
 
 									bend = getS1From(&sseq[curOffset]) * 64;
@@ -1115,24 +1207,29 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 									loopStartCount = getU1From(&sseq[curOffset]);
 									curOffset++;
 
-									
-									loopStartOffset = curOffset;
-									if(loopStartCount == 0)
-									{
-											loopStartCount = -1;
-											if(!loopStartPointUsed)
-											{
-													switch(g_loopStyle)
-													{
-													case 1:
-															smfInsertControl(smf, absTime, midiCh, midiCh, 0x74, 0);
-															break;
-													case 2:
-															smfInsertMetaEvent(smf, absTime, midiCh, 6, "loopStart", 9);
-															break;
-													}
-													loopStartPointUsed = true;
-											}
+									if (g_loopStyle == 3) {
+										char markerText[14]; // loopStart:255
+										snprintf(markerText, 14, "loopStart:%d", loopStartCount);
+										smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 13);
+									} else {
+										loopStartOffset = curOffset;
+										if(loopStartCount == 0)
+										{
+												loopStartCount = -1;
+												if(!loopStartPointUsed)
+												{
+														switch(g_loopStyle)
+														{
+														case 1:
+																smfInsertControl(smf, absTime, midiCh, midiCh, 0x74, 0);
+																break;
+														case 2:
+																smfInsertMetaEvent(smf, absTime, midiCh, 6, "loopStart", 9);
+																break;
+														}
+														loopStartPointUsed = true;
+												}
+										}
 									}
 									
 									
@@ -1238,41 +1335,42 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 								case 0xfc: /* Dawn of Sorrow: SDL_BGM_WIND_ */
 								{
 									
-									if(loopStartCount > 0)
-									{
-											loopStartCount--;
-											curOffset = loopStartOffset;
-									}
-									if(loopStartCount == -1)
-									{
-											switch(g_loopStyle)
-											{
-											case 0:
-													loopCount--;
-													curOffset = loopStartOffset;
-													break;
-											case 1:
-													if(!loopEndPointUsed)
-													{
-															smfInsertControl(smf, absTime, midiCh, midiCh, 0x75, 0);
-															loopCount = 0;
-															loopEndPointUsed = true;
-													}
-													break;
-											case 2:
-													if(!loopEndPointUsed)
-													{
-															smfInsertMetaEvent(smf, absTime, midiCh, 6, "loopEnd", 7);
-															loopCount = 0;
-															loopEndPointUsed = true;
-													}
-													break;
-											}
+									if (g_loopStyle == 3) {
+										smfInsertMetaEvent(smf, absTime, midiCh, 6, "loopEnd", 7);
+									} else {
+										if(loopStartCount > 0)
+										{
+												loopStartCount--;
+												curOffset = loopStartOffset;
+										}
+										if(loopStartCount == -1)
+										{
+												switch(g_loopStyle)
+												{
+												case 0:
+														loopCount--;
+														curOffset = loopStartOffset;
+														break;
+												case 1:
+														if(!loopEndPointUsed)
+														{
+																smfInsertControl(smf, absTime, midiCh, midiCh, 0x75, 0);
+																loopCount = 0;
+																loopEndPointUsed = true;
+														}
+														break;
+												case 2:
+														if(!loopEndPointUsed)
+														{
+																smfInsertMetaEvent(smf, absTime, midiCh, 6, "loopEnd", 7);
+																loopCount = 0;
+																loopEndPointUsed = true;
+														}
+														break;
+												}
+										}
 									}
 									
-									
-									//smfInsertMetaEvent(smf, absTime, midiCh, 6, "loopEnd", 7);
-
 									sprintf(eventName, "Loop End");
 									sprintf(eventDesc, "");
 									break;
@@ -1517,4 +1615,143 @@ unsigned int getU3LitFrom(byte* data)
 unsigned int getU4LitFrom(byte* data)
 {
 	return (unsigned int) (data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24));
+}
+
+void readVarCom(byte* sseq, size_t* curOffset, char* outputString, byte statusByte, char* eventName, char* eventDesc){
+	if (/*sizeof(outputString) >= 23*/ true) {
+		uint8_t varNumber;
+		int16_t val;
+		const char* varMethodName[] = {
+			"=", "+=", "-=", "*=", "/=", "[Shift]", "[Rand]", "", 
+			"==", ">=", ">", "<=", "<", "!="
+		};
+		
+		varNumber = getU1From(&sseq[*curOffset]);
+		(*curOffset)++;
+		val = getU2LitFrom(&sseq[*curOffset]);
+		*curOffset += 2;
+		
+		char markerText[23]; // "Var:255,[Shift],-32767"
+		snprintf(markerText, 23, "Var:%u,%s,%d", varNumber, varMethodName[statusByte - 0xb0], val);
+		//snprintf(markerText, 23, "Var:1,1,1");
+		//printf("inner markerText: %s\n", markerText);
+		//smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 22);
+		strcpy(outputString, markerText);
+		
+		
+		sprintf(eventName, "Variable %s", varMethodName[statusByte - 0xb0]);
+		sprintf(eventDesc, "var %u : %d", varNumber, val);
+		
+		
+		//return markerText;
+		//strcpy(outputString, markerText);
+		return;
+	} else {
+		fprintf(stderr, "outputString is not large enough.\n");
+		return;
+	}
+}
+
+void readUseVar(byte* sseq, size_t* curOffset, char* outputString, char* eventName, char* eventDesc){
+	// 0xA1. params: Sequence Command, u8. Replaces the last parameter of P1 with the value of variable P2
+	byte subStatusByte;
+	int varNumber;
+  
+	subStatusByte = getU1From(&sseq[*curOffset]);
+	(*curOffset)++;
+	if(subStatusByte >= 0xb0 && subStatusByte <= 0xbd) /* var */
+	{
+		/* loveemu is a lazy person :P */
+		(*curOffset)++;
+		varNumber = getU1From(&sseq[*curOffset]);
+		(*curOffset)++;
+	}
+	else
+	{
+		varNumber = getU1From(&sseq[*curOffset]);
+		(*curOffset)++;
+	}
+  
+	char markerText[16]; // "UseVar:0xFF,255"
+	snprintf(markerText, 16, "UseVar:0x%02X,%u", subStatusByte, (uint8_t)varNumber);
+	//smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 15);
+	strcpy(outputString, markerText);
+  
+	sprintf(eventName, "From Var (%02X)", subStatusByte);
+	sprintf(eventDesc, "var %d", varNumber);
+	
+	//strcpy(outputString, markerText);
+	return;
+}
+
+void readParamOfType(char* outputText, int sseqParamType, byte* sseq, size_t* curOffset, size_t* sseqOffsetBase, size_t* sseqSize){
+	char paramText[30];
+	switch (sseqParamType){
+		case BOOLPARAM:
+			int flg;
+
+			flg = getU1From(&sseq[*curOffset]);
+			(*curOffset)++;
+
+			snprintf(paramText, 30, "%s", flg ? "On" : "Off");
+			break;
+		case S8PARAM:
+			int8_t S8PARAMval;
+
+			S8PARAMval = getU1From(&sseq[*curOffset]);
+			(*curOffset)++;
+			
+			snprintf(paramText, 30, "%d", S8PARAMval);
+			break;
+		case U8PARAM:
+			uint8_t U8PARAMval;
+
+			U8PARAMval = getU1From(&sseq[*curOffset]);
+			(*curOffset)++;
+			
+			snprintf(paramText, 30, "%u", U8PARAMval);
+			break;
+		case HEXU8PARAM: 
+			uint8_t HEXU8PARAMval;
+
+			HEXU8PARAMval = getU1From(&sseq[*curOffset]);
+			(*curOffset)++;
+			
+			snprintf(paramText, 30, "0x%02X", HEXU8PARAMval);
+			break;
+		case S16PARAM:
+			int16_t S16PARAMval;
+
+			S16PARAMval = getU2LitFrom(&sseq[*curOffset]);
+			*curOffset += 2;
+			
+			snprintf(paramText, 30, "%d", S16PARAMval);
+			break;
+		case U16PARAM:
+			uint16_t U16PARAMval;
+
+			U16PARAMval = getU2LitFrom(&sseq[*curOffset]);
+			*curOffset += 2;
+			
+			snprintf(paramText, 30, "%u", U16PARAMval);
+			break;
+		case HEXU24PARAM: 
+			int offsetVal;
+
+			//printf("curOffset: %d\n", *curOffset);
+			
+			offsetVal = getU3LitFrom(&sseq[*curOffset]) /*+ *sseqOffsetBase*/;
+			*curOffset += 3;
+			
+			snprintf(paramText, 30, "0x%06X", offsetVal);
+			break;
+		case VARLENPARAM:
+			int varLenVal = smfReadVarLength(&sseq[*curOffset], *sseqSize - *curOffset);
+			*curOffset += smfGetVarLengthSize(varLenVal);
+			
+			snprintf(paramText, 30, "%d", varLenVal);
+			break;
+	}
+	strcpy(outputText, paramText);
+	return;
 }
