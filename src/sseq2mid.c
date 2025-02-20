@@ -17,6 +17,8 @@
 #define SSEQ2MID_NAME "sseq2mid"
 #define SSEQ2MID_VER "20070314"
 
+// Currently, when converting sseq->midi->sseq, the final sseq will be larger in file size than the original sseq because the Call event, which compresses SSEQs by reusing identical data, is unsupported.
+
 bool g_log = false;
 bool g_modifyChOrder = false;
 bool g_noReverb = false;
@@ -170,7 +172,7 @@ void showUsage(void)
 		"-2", "--2loop", "convert to 2 loop", 
 		"-d", "--loopstyle1", "Duke nukem style loop points (Event 0x74/0x75)",
 		"-7", "--loopstyle2", "FF7 PC style loop points (Meta text \"loop(start/end)\"",
-		"-c", "--loopstyle3", "Complex loops: print jump events as is instead of simplifying to loop points",
+		"-c", "--loopstyle3", "Complex loops: insert multiple jump events instead of simplifying to loop points.",
 		"-l", "--log", "put conversion log", 
 		"-m", "--modify-ch", "modify midi channel to avoid rhythm channel",
 		"-s", "--spacer", "(EXPERIMENTAL) insert a short rest in between simultaneous events"
@@ -476,7 +478,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 
 			/* initialize track settings */
 			sseq2mid->track[0].loopCount = sseq2mid->loopCount;
-			sseq2mid->track[0].absTime = 0;
+			sseq2mid->track[0].absTime = 0; 
 			sseq2mid->track[0].noteWait = false;
 			sseq2mid->track[0].offsetToTop = 0x1c;
 			sseq2mid->track[0].offsetToReturn = SSEQ_INVALID_OFFSET;
@@ -499,6 +501,8 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 				int loopCount = sseq2mid->track[trackIndex].loopCount;
 				
 				int stackedEventTimeSpacer = 0; // used to space out midi events that, in the original sseq, happen at the same time (but in a specific order). The spacer ensures that the order of events is the same as in the sseq.
+				
+				uint8_t jumpIndex=0;
 				
 				byte prevStatusByte=0x00;
 
@@ -629,12 +633,20 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 								{
 									int newOffset;
 									if (g_loopStyle == 3) {
-										newOffset = getU3LitFrom(&sseq[curOffset]);
+										newOffset = getU3LitFrom(&sseq[curOffset]) + sseqOffsetBase;
 										curOffset += 3;
+										//
+										//char markerText[14]; // Jump:0x010101
+										//snprintf(markerText, 14, "Jump:0x%06X", newOffset);
+										//smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 13);
 										
-										char markerText[14]; // Jump:0x010101
-										snprintf(markerText, 14, "Jump:0x%06X", newOffset);
-										smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 13);
+										char markerText[9]; // Jump:255
+										char markerText2[13]; // JumpPoint255
+										snprintf(markerText, 9, "Jump:%u", jumpIndex);
+										snprintf(markerText2, 13, "JumpPoint%u", jumpIndex);
+										smfInsertMetaEvent(smf, sseq2mid->track[trackIndex].offsetToAbsTime[newOffset], midiCh, 6, markerText2, 12);
+										smfInsertMetaEvent(smf, absTime+stackedEventTimeSpacer, midiCh, 6, markerText, 8);
+										jumpIndex++;
 									} else {
 										newOffset = getU3LitFrom(&sseq[curOffset]) + sseqOffsetBase;
 										curOffset += 3;
@@ -800,6 +812,17 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 										duration = smfReadVarLength(&sseq[curOffset], sseqSize - curOffset);
 										curOffset += smfGetVarLengthSize(duration);
 										snprintf(subCommandMarkerText, 0x7F, "Note0x%02X:%d,%d", subStatusByte, velocity, duration);
+									} else if (subStatusByte == 0x94) { // duplicated code
+										int newOffset;
+										newOffset = getU3LitFrom(&sseq[curOffset]) + sseqOffsetBase;
+										curOffset += 3;
+										
+										char markerText[9]; // Jump:255
+										char markerText2[13]; // JumpPoint255
+										snprintf(markerText2, 13, "JumpPoint%u", jumpIndex);
+										smfInsertMetaEvent(smf, sseq2mid->track[trackIndex].offsetToAbsTime[newOffset], midiCh, 6, markerText2, 12);
+										snprintf(subCommandMarkerText, 0x7F, "Jump:%u", jumpIndex);
+										jumpIndex++;
 									} else {
 										int comIndex=0;
 										for (comIndex=0; comIndex < sseqComListLen; comIndex++){
