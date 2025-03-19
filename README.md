@@ -14,7 +14,7 @@ This software has not been rigorously tested. If you encounter a bug, please ope
 Please refer to [sequence.md](https://github.com/Thysbelon/midi2sseq/blob/master/sequence.md) to learn what the sseq commands do.
 - `Random:0x??,#,#` - `0xA0`
 - `UseVar:0x??,var#` - `0xA1`
-- `If:0x??` - `0xA2`
+- `If:<other command's marker text>` - `0xA2`
 - `Var:var#,<operation>,#` - `0xB0` to `0xBD` (except 0xB7)
 - `CC14` - `0xC6` (sets priority, which determines if the game engine should interrupt this track when playing sound effects)
 - `Tie:<on/off>` - `0xC8`
@@ -24,7 +24,7 @@ Please refer to [sequence.md](https://github.com/Thysbelon/midi2sseq/blob/master
 - `CC75` / Sound Controller 6 - `0xD1`
 - `CC76` / Sound Controller 7 - `0xD2`
 - `PrintVar:var#` - `0xD6`
-- `CC26` - `0xE0` (sets the delay before vibrato/tremolo/autopan starts when a note is played)
+- `CC26` or `ModDelay:#` - `0xE0` (sets the delay before vibrato/tremolo/autopan starts when a note is played)
 - `SweepPitch:#` - `0xE3`
 
 ## Compilation Notes (for Developers)
