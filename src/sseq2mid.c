@@ -449,8 +449,10 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 			int trackIndex;
 			int midiCh;
 			size_t sseqOffsetBase;
-			int midiChOrder[SSEQ_MAX_TRACK] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 9 }; // ! TODO (high priority): change behavior of -m so that when the sseq has 16 tracks (the maximum) instead of sseq channel 10 being placed on midi channel 9 (drums) and becoming inaudible, sseq channels 0-8 are placed on midi channels 0-8 then sseq channels 9-14 are placed on midi channels 10-15 then sseq channel 15 is placed on midi channel 0 *on the next midi port*. This is how vgmtrans handles it. Sonic Rush SEQ_4sonic.sseq. Dawn of Sorrow SDL_BGM_BOSS1_.sseq.
-
+			// when the -m option is being used: sseq channels 0-8 are placed on midi channels 0-8 then sseq channels 9-14 are placed on midi channels 10-15 then sseq channel 15 is placed on midi channel 0 *on the next midi port*. This is how vgmtrans handles it. Unfortunately, this doesn't solve the issue of the 16th SSEQ track not playing properly, as most midi synthesizer programs seem to ignore the Port event entirely. The only way to play tracks like these correctly is to set the 16th track to a separate synthesizer than all the previous tracks. For example, if you have a midi arranged in your DAW such that all the tracks are underneath the same midi synthesizer VST, you must make another copy of that midi synthesizer VST track, then place the 16th music track under that copy.
+			int midiChOrder[SSEQ_MAX_TRACK] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16 };
+			// examples of songs that use all 16 SSEQ tracks: Sonic Rush SEQ_4sonic.sseq. Dawn of Sorrow SDL_BGM_BOSS1_.sseq.
+			
 			/* put SSEQ header info */
 			sseq2midPutLogLine(sseq2mid, 0x00, 4, "Signature", "SSEQ");
 			sseq2midPutLogLine(sseq2mid, 0x04, 2, "", "Unknown");
@@ -471,7 +473,7 @@ bool sseq2midConvert(Sseq2mid* sseq2mid)
 			sseq2midPutLog(sseq2mid, "\n");
 
 			/* initialize channel order */
-			for(midiCh = 0; midiCh < SSEQ_MAX_TRACK; midiCh++) // !
+			for(midiCh = 0; midiCh < SSEQ_MAX_TRACK; midiCh++)
 			{
 				sseq2mid->chOrder[midiCh] = sseq2mid->modifyChOrder ? midiChOrder[midiCh] : midiCh;
 			}

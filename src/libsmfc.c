@@ -466,7 +466,7 @@ bool smfTrackEnumEvents(SmfTrack* track, SmfTrackEnumEventsProc* eventProc, void
 
   if(track && eventProc)
   {
-    int prevEventPort = 0;
+    int prevEventPort = 255; // nonsense number to make sure most tracks have port:0
     SmfEvent* event = track->firstEvent;
 
     result = true;
